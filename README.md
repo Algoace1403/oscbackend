@@ -23,14 +23,21 @@ It serves as an educational tool to understand the magic happening under the hoo
 
 ### Core Functionality
 - **Custom HTTP Parser**: Parses Request Lines, Headers, and Body without libraries.
-- **RESTful Routing**: Supports dynamic routing for `GET` and `POST` requests.
+- **RESTful Routing**: Supports dynamic routing for `GET`, `POST`, `PUT`, and `DELETE` requests.
+- **Header Parsing**: Properly parses HTTP headers (Host, Content-Type, Content-Length, etc.).
 - **In-Memory Database**: Ephemeral data storage for demonstration.
 - **Query Parameter Parsing**: Handles URL query strings manually.
+- **Status Code Handling**: Supports 200, 400, 404, and 500 status codes.
 
 ### Bonus Features
-- **📝 Request Logging**: Logs every incoming request to the console.
-- **🌐 CORS Support**: Enabled for all origins (`Access-Control-Allow-Origin: *`).
-- **🛡️ Error Handling**: Graceful handling of 404s and JSON parsing errors.
+- **📝 Request Logging**: Logs every incoming request with method and path to the console.
+- **🌐 CORS Support**: Full CORS support with preflight (OPTIONS) handling for all origins.
+- **🛡️ Error Handling**: Graceful handling of 404s, 400s, 413s, 500s, and JSON parsing errors.
+- **⚡ Concurrent Request Handling**: Node.js event loop handles multiple clients concurrently.
+- **🔄 Graceful Shutdown**: Properly handles server shutdown with Ctrl+C.
+- **🔒 Request Body Size Limits**: 1MB maximum body size to prevent DoS attacks.
+- **✅ Request Validation**: Validates request format, headers, and body before processing.
+- **📊 Better Error Messages**: Detailed error messages for debugging.
 
 ---
 
@@ -104,6 +111,20 @@ Fetches a specific item by its index.
 - **Example**: `GET /data/0`
 - **Response**: `200 OK` or `404 Not Found`
 
+### 6. Update Item by ID
+Updates an existing item by its index.
+- **Endpoint**: `PUT /data/:id`
+- **Headers**: `Content-Type: application/json`
+- **Body**: JSON object with new data
+- **Example**: `PUT /data/0` with body `{"name": "Updated", "value": 999}`
+- **Response**: `200 OK` with updated data or `404 Not Found` or `400 Bad Request`
+
+### 7. Delete Item by ID
+Deletes an item by its index.
+- **Endpoint**: `DELETE /data/:id`
+- **Example**: `DELETE /data/0`
+- **Response**: `200 OK` with deleted item or `404 Not Found` or `400 Bad Request`
+
 ---
 
 ## 🧪 Testing
@@ -134,9 +155,17 @@ curl http://localhost:8080/data
 | Decision | Rationale |
 | :--- | :--- |
 | **`net` Module** | Chosen over `http` module to force manual implementation of protocol parsing, satisfying the assignment's core objective. |
-| **Single-Threaded** | Leverages Node.js's event loop for concurrency. While the parsing is synchronous, the I/O is non-blocking. |
-| **In-Memory Store** | A simple array (`[]`) is used for storage to avoid external database dependencies and keep the setup zero-config. |
+| **Event-Driven Architecture** | Leverages Node.js's event loop for concurrency. While the parsing is synchronous, the I/O is non-blocking, allowing multiple clients to connect simultaneously. |
+| **In-Memory Store** | A simple array (`[]`) is used for storage to avoid external database dependencies and keep the setup zero-config. Data is ephemeral and lost on server restart. |
+| **Manual Header Parsing** | Headers are parsed manually by splitting on `:` and storing in an object. This demonstrates low-level HTTP understanding. |
+| **PUT & DELETE Methods** | Implemented to satisfy the requirement of supporting at least one of PUT/DELETE/PATCH. Both PUT and DELETE are implemented for completeness. |
+| **Error Handling** | All routes are wrapped in try-catch blocks to handle unexpected errors and return proper 500 status codes. |
 | **Sync Parsing** | Request parsing is done synchronously for simplicity. In a production server, this would be streamed to handle large bodies. |
+| **Request Validation** | Validates request line format, HTTP version, and request structure before processing. |
+| **Body Size Limits** | Implements 1MB body size limit to prevent DoS attacks and memory exhaustion. |
+| **OPTIONS Method** | Supports OPTIONS method for CORS preflight requests from browsers. |
+| **Path Parsing** | Properly separates path from query parameters and validates path structure. |
+| **Content-Type Validation** | Validates Content-Type header for POST/PUT requests to ensure JSON format. |
 
 ---
 
