@@ -1,338 +1,538 @@
-const net = require('net');
-
-// =====================================================
-// 🎓 HTTP SERVER FROM SCRATCH - HINGLISH EXPLANATION
-// =====================================================
+// 🎓 HTTP SERVER FROM SCRATCH -
 //
 // Is server ko ek restaurant ke waiter ki tarah samjho:
-// 1. Ye customer (Client) ke aane ka wait karta hai.
-// 2. Unki baat sunta hai (Request).
-// 3. Samajhta hai ki unhe kya chahiye (Parsing).
-// 4. Jo manga wo la kar deta hai (Response).
+// 1. Ye customer (Client) ke aane ka wait karta hai
+// 2. Unki baat sunta hai (Request receive karta hai)
+// 3. Samajhta hai ki unhe kya chahiye (Request ko parse karta hai)
+// 4. Jo manga wo la kar deta hai (Response bhejta hai)
 //
-// Hum 'net' module use kar rahe hain taaki hum seedha "wires" (TCP Sockets) se baat kar sakein.
-// Hum 'http' ya 'express' use nahi kar rahe kyunki humein khud ka logic banana hai!
+// IMPORTANT: Hum 'net' module use kar rahe hain
+// - Ye Node.js ka built-in module hai
+// - Isse hum seedha TCP sockets se baat kar sakte hain
+// - Hum 'http' ya 'express' use NAHI kar rahe (assignment requirement)
+// - Kyunki humein khud se HTTP protocol implement karna hai!
 
-// =====================================================
-// ⚙️ CONFIGURATION - Server ki settings
-// =====================================================
-const PORT = process.env.PORT || 8080; // Ye wo "darwaza" (port) hai jahan humara server sunega.
-// process.env.PORT se check karte hain agar koi environment variable set hai toh use karenge, warna 8080 default
+const net = require('net');
+// 'net' module import kar rahe hain - ye TCP connections handle karta hai
 
-// Request body ka maximum size limit (security ke liye)
-// Agar koi bahut bada request bheje toh server crash na ho
-const MAX_BODY_SIZE = 1024 * 1024; // 1MB limit (bytes mein)
+// ⚙️ CONFIGURATION - Server ki basic settings
 
-// Data store karne ke liye ek simple jagah (jaise ek temporary notepad).
-// Agar server restart hua, toh ye sab gayab ho jayega!
-// Ye ek array hai jismein hum JSON objects store karenge
+// PORT - Ye wo "darwaza" hai jahan server sunega
+// process.env.PORT = agar environment variable mein PORT set hai toh use karo
+// || 8080 = warna default 8080 use karo
+const PORT = process.env.PORT || 8080;
+
+// MAX_BODY_SIZE - Request body ka maximum size limit
+// Kyu? Security ke liye - agar koi bahut bada request bheje toh server crash na ho
+// 1024 * 1024 = 1MB (1 million bytes)
+const MAX_BODY_SIZE = 1024 * 1024; // 1MB limit
+
+// dataStore - Ye ek simple array hai jismein hum data store karenge
+// Jaise ek temporary notepad - server restart hote hi sab gayab ho jayega
+// Ismein hum JSON objects store karenge
 let dataStore = [];
 
+// 🖥️ SERVER BANANA - Main server setup
+
+// net.createServer() - Ye ek server banata hai
+// Jab bhi koi naya client connect karega, ye function chalega
 const server = net.createServer((socket) => {
-    // Ye function TAB chalta hai jab bhi koi naya banda (client) connect karta hai.
-    // 'socket' us bande ke saath ek direct phone line ki tarah hai.
+    // socket = ye ek direct connection hai client ke saath
+    // Jaise ek phone line jo client aur server ko jodti hai
+    
     console.log('✨ Ek client connect hua!');
 
-    // EVENT: Jab client se data (text) aata hai
+    // 📨 EVENT: Jab client se data aata hai
+
+    // socket.on('data') = jab bhi client se kuch data aaye, ye function chalega
     socket.on('data', (buffer) => {
-        // 1. RAW DATA RECEIVE KARNA
-        // Computers data ko bytes (0s aur 1s) mein bhejte hain. Hum usse text mein convert karte hain padhne ke liye.
+        // buffer = ye raw bytes hai jo client ne bheje hain
+        // Computers data ko 0s aur 1s (bytes) mein bhejte hain
+        
+        // STEP 1: Bytes ko text mein convert karna
+        // toString() se bytes ko readable text mein convert karte hain
         const requestString = buffer.toString();
         
-        // Agar request bilkul khali hai toh error bhejo
+        // Safety check: Agar request bilkul khali hai toh error bhejo
         if (!requestString || requestString.trim().length === 0) {
             sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Empty request received');
-            return;
+            return; // Function se bahar nikal jao
         }
 
-        // 2. REQUEST PARSE KARNA (Samajhna ki wo kya chahte hain)
-        // HTTP requests aisi dikhti hain:
-        // GET /hello HTTP/1.1  <-- Request Line (Kya chahiye?)
-        // Host: localhost      <-- Headers (Extra info)
-        //                      <-- Khali Line
-        // Body...              <-- Body (Agar kuch data bheja hai)
+        // STEP 2: REQUEST KO PARSE KARNA (Samajhna ki client kya chahta hai)
 
-        // Text ko lines mein tod rahe hain taaki ek-ek karke padh sakein.
+
+        // HTTP request ka format aisa hota hai:
+        // 
+        // GET /hello HTTP/1.1          <-- Request Line (pehli line)
+        // Host: localhost:8080          <-- Headers (extra information)
+        // Content-Type: application/json
+        //                              <-- Khali line (headers khatam)
+        // {"name": "test"}              <-- Body (actual data, agar hai toh)
+
+        // Request ko lines mein tod do
+        // '\r\n' = ye ek special character hai jo lines ko alag karta hai
         const lines = requestString.split('\r\n');
 
-        // Agar koi line hi nahi hai toh error
+        // Safety check: Agar koi line hi nahi hai toh error
         if (lines.length === 0 || !lines[0]) {
             sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Invalid request format');
             return;
         }
 
-        // Pehli line humein COMMAND (Method) aur TARGET (Path) batati hai.
+        // STEP 3: REQUEST LINE SE METHOD AUR PATH NIKALNA
+        // =====================================================
+        // Pehli line (requestLine) mein 3 cheezein hoti hain:
         // Example: "GET /data HTTP/1.1"
-        const requestLine = lines[0];
-        const parts = requestLine.split(' ');
+        //   - Method: GET (kya karna hai)
+        //   - Path: /data (kahan jana hai)
+        //   - HTTP Version: HTTP/1.1 (kaunsa version use kar rahe hain)
+        // =====================================================
         
-        // Request line mein kam se kam 3 parts hone chahiye: Method, Path, HTTP Version
+        const requestLine = lines[0]; // Pehli line uthao
+        const parts = requestLine.split(' '); // Space se tod do
+        
+        // Safety check: Kam se kam 3 parts hone chahiye
         if (parts.length < 3) {
             sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Invalid request line format');
             return;
         }
         
-        const method = parts[0].toUpperCase(); // e.g., GET, POST (uppercase mein convert)
-        const path = parts[1];   // e.g., /, /echo, /data
-        const httpVersion = parts[2]; // e.g., HTTP/1.1
+        // Method = pehla word (GET, POST, PUT, DELETE, etc.)
+        // toUpperCase() = sabko capital letters mein convert karo
+        // Kyu? Taaki "get" aur "GET" dono same treat ho
+        const method = parts[0].toUpperCase(); // e.g., "GET", "POST"
         
-        // HTTP version check karte hain (hum sirf HTTP/1.1 support karte hain)
+        // Path = doosra word (/, /echo, /data, etc.)
+        const path = parts[1]; // e.g., "/", "/echo", "/data"
+        
+        // HTTP Version = teesra word (HTTP/1.1, HTTP/2.0, etc.)
+        const httpVersion = parts[2]; // e.g., "HTTP/1.1"
+        
+        // Safety check: HTTP version sahi format mein hona chahiye
         if (!httpVersion.startsWith('HTTP/')) {
             sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Invalid HTTP version');
             return;
         }
         
-        // Request logging - konsa method aur path use ho raha hai
+        // Logging: Konsa method aur path use ho raha hai (debugging ke liye)
         console.log(`📩 ${method} ${path} - Request received`);
 
-        // 3. HEADERS PARSE KARNA (Important information)
-        // Headers ek key-value pair ki tarah hote hain, jaise:
-        // Host: localhost:8080
-        // Content-Type: application/json
-        // Content-Length: 25
-        let headers = {};
-        let i = 1;
-        // Headers ke lines ko padhte raho jab tak khali line na mile
+        // STEP 4: HEADERS PARSE KARNA
+        // =====================================================
+        // Headers = extra information jo client bhejta hai
+        // Format: "Key: Value"
+        // Examples:
+        //   Host: localhost:8080
+        //   Content-Type: application/json
+        //   Content-Length: 25
+        // =====================================================
+        
+        let headers = {}; // Ek empty object banate hain (key-value pairs store karne ke liye)
+        let i = 1; // Pehli line (index 0) request line hai, isliye 1 se start karte hain
+        
+        // Loop: Headers ko padhte raho jab tak khali line na mile
+        // Khali line = headers khatam hone ka signal
         while (i < lines.length && lines[i] !== '') {
-            const headerLine = lines[i];
+            const headerLine = lines[i]; // Ek header line uthao
+            
             // Header format: "Key: Value"
-            const colonIndex = headerLine.indexOf(':');
-            if (colonIndex !== -1) {
+            // Colon (:) se pehle key, baad mein value
+            const colonIndex = headerLine.indexOf(':'); // Colon kahan hai dhoondo
+            
+            if (colonIndex !== -1) { // Agar colon mila
+                // Key = colon se pehle wala part
+                // trim() = spaces hata do
+                // toLowerCase() = sabko lowercase mein convert karo (consistency ke liye)
                 const key = headerLine.substring(0, colonIndex).trim().toLowerCase();
+                
+                // Value = colon ke baad wala part
                 const value = headerLine.substring(colonIndex + 1).trim();
-                headers[key] = value; // Object mein store kar liya
+                
+                // Object mein store kar do
+                headers[key] = value;
             }
-            i++;
+            i++; // Agli line pe jao
         }
         
-        // 4. BODY NIKAALNA (Jo data unhone bheja)
-        // Body hamesha headers aur ek khali line ke baad aati hai.
+        // STEP 5: BODY NIKALNA
+        // =====================================================
+        // Body = actual data jo client ne bheja hai
+        // Body hamesha headers aur ek khali line ke BAAD aati hai
         // Ab 'i' pointer khali line pe hai, isliye uske baad wala sab body hai
-        let body = '';
+        // =====================================================
+        
+        let body = ''; // Empty string se start karo
+        
+        // Agar khali line ke baad kuch hai toh wo body hai
         if (i < lines.length - 1) {
             // Khali line ke baad ki sab lines ko join karke body banate hain
+            // slice(i + 1) = khali line ke baad ki sab lines
+            // join('\r\n') = unhe wapas se '\r\n' se jodo
             body = lines.slice(i + 1).join('\r\n');
         }
+
+        // STEP 6: BODY SIZE CHECK KARNA
+        // =====================================================
+        // Security check: Body ka size limit se zyada toh nahi hai?
+        // =====================================================
         
-        // Content-Length header se verify karte hain ki body sahi size ki hai
-        // (Security check - body size limit)
+        // Content-Length header se body ka size nikalte hain
+        // parseInt() = string ko number mein convert karta hai
+        // Agar header nahi hai toh 0 use karo
         const contentLength = headers['content-length'] ? parseInt(headers['content-length']) : 0;
         
-        // Body size check - agar bahut bada hai toh reject kar do
+        // Safety check: Agar body bahut bada hai toh reject kar do
         if (contentLength > MAX_BODY_SIZE) {
-            sendResponse(socket, 413, 'Payload Too Large', 'text/plain', `Request body too large. Maximum size: ${MAX_BODY_SIZE} bytes`);
+            sendResponse(socket, 413, 'Payload Too Large', 'text/plain', 
+                `Request body too large. Maximum size: ${MAX_BODY_SIZE} bytes`);
             return;
         }
         
-        // Actual body size check
+        // Optional check: Actual body size aur Content-Length header match karte hain?
         const actualBodySize = Buffer.byteLength(body, 'utf8');
         if (contentLength > 0 && actualBodySize !== contentLength) {
-            // Content-Length header aur actual body size match nahi kar rahe
+            // Warning log karo (match nahi kar rahe)
             console.warn(`⚠️ Content-Length mismatch: Expected ${contentLength}, got ${actualBodySize}`);
         }
 
-        // 5. ROUTING (Decide karna ki ab kya karein)
-        // Hum check karenge ki user ne kya manga hai (Method + Path).
-        // Try-catch block mein wrap karte hain taaki agar koi error aaye toh 500 bhej sakein
+        // STEP 7: ROUTING - Decide karna ki kya karna hai
+        // =====================================================
+        // Ab hum check karenge ki user ne kya manga hai
+        // Method (GET/POST/PUT/DELETE) + Path (/data, /echo, etc.) ke basis pe
+        // Try-catch = agar koi error aaye toh catch karo aur 500 error bhejo
+        // =====================================================
+        
         try {
-            // CASE 0: CORS Preflight Request (OPTIONS method)
+            // =====================================================
+            // CASE 0: OPTIONS Method (CORS Preflight)
+            // =====================================================
             // Browser pehle OPTIONS request bhejta hai CORS check karne ke liye
-            // Is case mein hum sirf headers bhejte hain, body nahi
+            // Ismein sirf headers bhejte hain, body nahi
+            // =====================================================
             if (method === 'OPTIONS') {
-                // CORS headers already sendResponse function mein hain, isliye bas empty body ke saath call karte hain
+                // CORS headers already sendResponse function mein hain
+                // Bas empty body ke saath response bhej do
                 sendResponse(socket, 200, 'OK', 'text/plain', '');
-                return;
+                return; // Function se bahar nikal jao
             }
             
-            // Path ko clean karte hain - query parameters alag karte hain
-            // Example: "/echo?message=hello" -> path="/echo", query="message=hello"
-            const pathParts = path.split('?');
-            const cleanPath = pathParts[0]; // Path without query parameters
+            // =====================================================
+            // PATH CLEANING - Query parameters alag karna
+            // =====================================================
+            // Example: "/echo?message=hello"
+            //   - cleanPath = "/echo" (actual path)
+            //   - query = "message=hello" (query parameters)
+            // =====================================================
+            const pathParts = path.split('?'); // '?' se tod do
+            const cleanPath = pathParts[0]; // Pehla part = actual path (without query)
             
-            // CASE 1: Wo bas home page pe aaye hain ("/")
+            // =====================================================
+            // CASE 1: GET / (Home Page)
+            // =====================================================
+            // User bas home page pe aaya hai
+            // Simple welcome message bhejo
+            // =====================================================
             if (method === 'GET' && cleanPath === '/') {
-                const reply = 'Welcome to your custom HTTP Server!';
-                sendResponse(socket, 200, 'OK', 'text/plain', reply);
-            }
+            const reply = 'Welcome to your custom HTTP Server!';
+            sendResponse(socket, 200, 'OK', 'text/plain', reply);
+        }
 
-            // CASE 2: Wo chahte hain hum wahi bole jo unhone bola ("/echo?message=hello")
+            // =====================================================
+            // CASE 2: GET /echo?message=<text> (Echo Service)
+            // =====================================================
+            // User chahta hai ki hum wahi bole jo unhone bola
+            // Example: /echo?message=hello -> "Echo: hello"
+            // =====================================================
             else if (method === 'GET' && cleanPath === '/echo') {
-                // Humein "message=" ke baad wala text chahiye
-                const queryString = pathParts[1] || ''; // Query string part
+                // Query string part nikaalo (message=hello)
+                const queryString = pathParts[1] || ''; // Agar query nahi hai toh empty string
+                
+                // URLSearchParams = query string ko parse karta hai
+                // Example: "message=hello" -> {message: "hello"}
                 const query = new URLSearchParams(queryString);
-                const msg = query.get('message') || 'Kuch toh bolo!';
+                
+                // 'message' parameter nikaalo, agar nahi hai toh default message
+            const msg = query.get('message') || 'Kuch toh bolo!';
 
-                sendResponse(socket, 200, 'OK', 'text/plain', `Echo: ${msg}`);
-            }
+                // Echo message bhejo
+            sendResponse(socket, 200, 'OK', 'text/plain', `Echo: ${msg}`);
+        }
 
-            // CASE 3: Wo data SAVE karna chahte hain (POST /data)
+            // =====================================================
+            // CASE 3: POST /data (Data Save Karna)
+            // =====================================================
+            // User naya data save karna chahta hai
+            // Body mein JSON data hoga
+            // =====================================================
             else if (method === 'POST' && cleanPath === '/data') {
                 try {
-                    // Body check - POST request mein body honi chahiye
+                    // Safety check 1: Body honi chahiye
                     if (!body || body.trim().length === 0) {
-                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Request body is required for POST');
+                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                            'Request body is required for POST');
                         return;
                     }
                     
-                    // Content-Type check - JSON data ke liye application/json hona chahiye
+                    // Safety check 2: Content-Type sahi hona chahiye
                     const contentType = headers['content-type'] || '';
                     if (!contentType.includes('application/json')) {
-                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Content-Type must be application/json');
+                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                            'Content-Type must be application/json');
                         return;
                     }
                     
-                    // Body text hoti hai, usse JavaScript Object (JSON) banate hain.
-                    const data = JSON.parse(body);
+                    // Body ko JSON se JavaScript object mein convert karo
+                    // JSON.parse() = JSON string ko object mein convert karta hai
+                    // Example: '{"name":"test"}' -> {name: "test"}
+                const data = JSON.parse(body);
                     
-                    // Data ko validate karte hain - empty object check
+                    // Safety check 3: Data valid object hona chahiye
                     if (typeof data !== 'object' || data === null) {
-                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Data must be a valid JSON object');
+                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                            'Data must be a valid JSON object');
                         return;
                     }
                     
-                    dataStore.push(data); // List mein save kar liya!
-                    const newId = dataStore.length - 1; // Naya ID
+                    // Data ko array mein save karo
+                    dataStore.push(data); // Array ke end mein add karo
+                    const newId = dataStore.length - 1; // Naya ID = array ki length - 1
 
+                    // Success response bhejo
                     const reply = JSON.stringify({ 
                         status: 'success', 
                         message: 'Data saved successfully!', 
-                        id: newId,
-                        data: data 
-                    }, null, 2);
+                        id: newId, // Naya item ka ID
+                        data: data // Saved data
+                    }, null, 2); // null, 2 = pretty print (readable format)
+                    
+                    // 201 = Created (naya resource banaya)
                     sendResponse(socket, 201, 'Created', 'application/json', reply);
+                    
                 } catch (error) {
-                    // Agar unhone galat data bheja jo JSON nahi hai
+                    // Agar JSON parse mein error aaye
                     if (error instanceof SyntaxError) {
-                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Invalid JSON format: ' + error.message);
+                        // SyntaxError = galat JSON format
+                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                            'Invalid JSON format: ' + error.message);
                     } else {
-                        sendResponse(socket, 500, 'Internal Server Error', 'text/plain', 'Server error: ' + error.message);
+                        // Koi aur error = server problem
+                        sendResponse(socket, 500, 'Internal Server Error', 'text/plain', 
+                            'Server error: ' + error.message);
                     }
                 }
             }
 
-            // CASE 4: Wo saara data DEKHNA chahte hain (GET /data)
+            // =====================================================
+            // CASE 4: GET /data (Saara Data Dekhna)
+            // =====================================================
+            // User saara stored data dekhna chahta hai
+            // =====================================================
             else if (method === 'GET' && cleanPath === '/data') {
-                const reply = JSON.stringify(dataStore, null, 2); // Pretty print JSON
+                // Saara data JSON mein convert karo
+                // null, 2 = pretty print (readable format)
+                const reply = JSON.stringify(dataStore, null, 2);
                 sendResponse(socket, 200, 'OK', 'application/json', reply);
             }
 
-            // CASE 5: Wo koi EK specific item chahte hain (GET /data/0)
+            // =====================================================
+            // CASE 5: GET /data/:id (Ek Specific Item Dekhna)
+            // =====================================================
+            // User ek specific item dekhna chahta hai
+            // Example: /data/0 = pehla item, /data/1 = doosra item
+            // =====================================================
             else if (method === 'GET' && cleanPath.startsWith('/data/')) {
-                // Path ke end se ID nikaal rahe hain
+                // Path ko parts mein tod do
+                // Example: "/data/0" -> ["", "data", "0"]
                 const pathSegments = cleanPath.split('/');
+                
+                // Safety check: Path format sahi hona chahiye
+                // Length 3 honi chahiye: ["", "data", "id"]
                 if (pathSegments.length !== 3) {
-                    sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Invalid path format. Use /data/:id');
+                    sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                        'Invalid path format. Use /data/:id');
                     return;
                 }
                 
-                const id = pathSegments[2];
-                const index = parseInt(id);
+                // ID nikaalo (teesra part)
+                const id = pathSegments[2]; // "0", "1", etc.
                 
-                // ID validation
+                // String ko number mein convert karo
+                const index = parseInt(id); // "0" -> 0, "1" -> 1
+                
+                // Safety check: ID valid number hona chahiye
                 if (isNaN(index) || index < 0) {
-                    sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Invalid ID format. ID must be a non-negative number');
+                    sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                        'Invalid ID format. ID must be a non-negative number');
                     return;
                 }
 
+                // Data check: Agar item exist karta hai
                 if (index < dataStore.length && dataStore[index] !== undefined) {
+                    // Item mil gaya - JSON mein convert karke bhejo
                     const reply = JSON.stringify(dataStore[index], null, 2);
-                    sendResponse(socket, 200, 'OK', 'application/json', reply);
+            sendResponse(socket, 200, 'OK', 'application/json', reply);
                 } else {
-                    sendResponse(socket, 404, 'Not Found', 'text/plain', `Item with ID ${index} not found`);
+                    // Item nahi mila - 404 error
+                    sendResponse(socket, 404, 'Not Found', 'text/plain', 
+                        `Item with ID ${index} not found`);
                 }
             }
 
-            // CASE 6: Data UPDATE karna (PUT /data/:id)
-            // PUT method se hum existing data ko update kar sakte hain
+            // =====================================================
+            // CASE 6: PUT /data/:id (Data Update Karna)
+            // =====================================================
+            // User existing data ko update karna chahta hai
+            // Body mein naya data hoga jo purane data ko replace karega
+            // =====================================================
             else if (method === 'PUT' && cleanPath.startsWith('/data/')) {
                 try {
+                    // Path ko parts mein tod do
                     const pathSegments = cleanPath.split('/');
+                    
+                    // Safety check: Path format sahi hona chahiye
                     if (pathSegments.length !== 3) {
-                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Invalid path format. Use /data/:id');
+                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                            'Invalid path format. Use /data/:id');
                         return;
                     }
                     
+                    // ID nikaalo aur number mein convert karo
                     const id = pathSegments[2];
-                    const index = parseInt(id);
-                    
+            const index = parseInt(id);
+
+                    // Safety check: ID valid hona chahiye
                     if (isNaN(index) || index < 0) {
-                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Invalid ID format. ID must be a non-negative number');
+                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                            'Invalid ID format. ID must be a non-negative number');
                         return;
                     }
                     
-                    // Body check - PUT request mein body honi chahiye
+                    // Safety check: Body honi chahiye
                     if (!body || body.trim().length === 0) {
-                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Request body is required for PUT');
+                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                            'Request body is required for PUT');
                         return;
                     }
                     
+                    // Data check: Agar item exist karta hai
                     if (index < dataStore.length && dataStore[index] !== undefined) {
-                        // Existing data ko naye data se replace kar do
+                        // Body ko JSON se object mein convert karo
                         const newData = JSON.parse(body);
+                        
+                        // Purane data ko naye data se replace karo
                         dataStore[index] = newData;
-                        const reply = JSON.stringify({ status: 'success', message: 'Data updated!', data: newData }, null, 2);
-                        sendResponse(socket, 200, 'OK', 'application/json', reply);
-                    } else {
-                        sendResponse(socket, 404, 'Not Found', 'text/plain', `Item with ID ${index} not found for update`);
+                        
+                        // Success response bhejo
+                        const reply = JSON.stringify({ 
+                            status: 'success', 
+                            message: 'Data updated!', 
+                            data: newData 
+                        }, null, 2);
+                sendResponse(socket, 200, 'OK', 'application/json', reply);
+            } else {
+                        // Item nahi mila - 404 error
+                        sendResponse(socket, 404, 'Not Found', 'text/plain', 
+                            `Item with ID ${index} not found for update`);
                     }
                 } catch (error) {
+                    // Error handling
                     if (error instanceof SyntaxError) {
-                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Invalid JSON data: ' + error.message);
+                        // Galat JSON format
+                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                            'Invalid JSON data: ' + error.message);
                     } else {
-                        sendResponse(socket, 500, 'Internal Server Error', 'text/plain', 'Server error: ' + error.message);
+                        // Server error
+                        sendResponse(socket, 500, 'Internal Server Error', 'text/plain', 
+                            'Server error: ' + error.message);
                     }
                 }
             }
             
-            // CASE 7: Data DELETE karna (DELETE /data/:id)
-            // DELETE method se hum data ko remove kar sakte hain
+            // =====================================================
+            // CASE 7: DELETE /data/:id (Data Delete Karna)
+            // =====================================================
+            // User data ko delete karna chahta hai
+            // =====================================================
             else if (method === 'DELETE' && cleanPath.startsWith('/data/')) {
                 try {
+                    // Path ko parts mein tod do
                     const pathSegments = cleanPath.split('/');
+                    
+                    // Safety check: Path format sahi hona chahiye
                     if (pathSegments.length !== 3) {
-                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Invalid path format. Use /data/:id');
+                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                            'Invalid path format. Use /data/:id');
                         return;
                     }
                     
+                    // ID nikaalo aur number mein convert karo
                     const id = pathSegments[2];
                     const index = parseInt(id);
                     
+                    // Safety check: ID valid hona chahiye
                     if (isNaN(index) || index < 0) {
-                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 'Invalid ID format. ID must be a non-negative number');
+                        sendResponse(socket, 400, 'Bad Request', 'text/plain', 
+                            'Invalid ID format. ID must be a non-negative number');
                         return;
                     }
                     
+                    // Data check: Agar item exist karta hai
                     if (index < dataStore.length && dataStore[index] !== undefined) {
-                        // Array se item ko remove kar do
+                        // Array se item ko remove karo
+                        // splice(index, 1) = index se 1 item remove karo
+                        // [0] = pehla (aur sirf) removed item
                         const deletedItem = dataStore.splice(index, 1)[0];
-                        const reply = JSON.stringify({ status: 'success', message: 'Data deleted!', deleted: deletedItem }, null, 2);
+                        
+                        // Success response bhejo
+                        const reply = JSON.stringify({ 
+                            status: 'success', 
+                            message: 'Data deleted!', 
+                            deleted: deletedItem 
+                        }, null, 2);
                         sendResponse(socket, 200, 'OK', 'application/json', reply);
                     } else {
-                        sendResponse(socket, 404, 'Not Found', 'text/plain', `Item with ID ${index} not found for deletion`);
+                        // Item nahi mila - 404 error
+                        sendResponse(socket, 404, 'Not Found', 'text/plain', 
+                            `Item with ID ${index} not found for deletion`);
                     }
                 } catch (error) {
-                    sendResponse(socket, 500, 'Internal Server Error', 'text/plain', 'Server error: ' + error.message);
+                    // Server error
+                    sendResponse(socket, 500, 'Internal Server Error', 'text/plain', 
+                        'Server error: ' + error.message);
                 }
             }
             
-            // CASE 8: Humein nahi pata ye kaunsa page hai (404)
-            else {
-                sendResponse(socket, 404, 'Not Found', 'text/plain', 'Page nahi mila');
+            // =====================================================
+            // CASE 8: 404 Not Found (Koi Bhi Route Match Nahi Hua)
+            // =====================================================
+            // Agar koi bhi route match nahi hua, matlab page nahi mila
+            // =====================================================
+        else {
+            sendResponse(socket, 404, 'Not Found', 'text/plain', 'Page nahi mila');
             }
             
         } catch (error) {
-            // Agar koi unexpected error aaye (jaise parsing mein problem), toh 500 bhejo
+            // Agar koi unexpected error aaye (jaise parsing mein problem)
+            // Toh 500 Internal Server Error bhejo
             console.error('❌ Server Error:', error);
-            sendResponse(socket, 500, 'Internal Server Error', 'text/plain', 'Server mein kuch galat ho gaya: ' + error.message);
+            sendResponse(socket, 500, 'Internal Server Error', 'text/plain', 
+                'Server mein kuch galat ho gaya: ' + error.message);
         }
     });
 
-    // EVENT: Client chala gaya (connection close ho gaya)
+    // =====================================================
+    // EVENT: Client Disconnect (Connection Close)
+    // =====================================================
+    // Jab client connection close karta hai
     socket.on('end', () => {
         console.log('👋 Client disconnected');
     });
     
-    // EVENT: Agar koi error aaye connection mein
+    // =====================================================
+    // EVENT: Connection Error
+    // =====================================================
+    // Agar connection mein koi error aaye
     socket.on('error', (error) => {
         console.error('❌ Socket Error:', error.message);
     });
@@ -341,66 +541,67 @@ const server = net.createServer((socket) => {
 // =====================================================
 // 🛠️ HELPER FUNCTION: RESPONSE BHEJNA
 // =====================================================
-// Ye function official HTTP response banata hai.
-// Ye client ko ek formal letter likhne jaisa hai.
+// Ye function official HTTP response banata hai
+// Jaise ek formal letter likhne jaisa hai
 // 
-// HTTP Response format:
-// HTTP/1.1 200 OK                    <-- Status Line
-// Date: Mon, 01 Jan 2024 12:00:00 GMT <-- Headers
+// HTTP Response ka format:
+// HTTP/1.1 200 OK                    <-- Status Line (pehli line)
+// Date: Mon, 01 Jan 2024 12:00:00 GMT <-- Headers (extra info)
 // Content-Type: application/json
 // Content-Length: 25
 // Connection: close
-//                                         <-- Khali line (ZAROORI!)
-// {"status": "success"}                  <-- Body
+//                                         <-- Khali line (ZAROORI! Headers aur body ke beech)
+// {"status": "success"}                  <-- Body (actual data)
 // =====================================================
-// 🛠️ HELPER FUNCTION: RESPONSE BHEJNA
-// =====================================================
-// Ye function official HTTP response banata hai.
-// Ye client ko ek formal letter likhne jaisa hai.
-// 
-// HTTP Response format:
-// HTTP/1.1 200 OK                    <-- Status Line
-// Date: Mon, 01 Jan 2024 12:00:00 GMT <-- Headers
-// Content-Type: application/json
-// Content-Length: 25
-// Connection: close
-//                                         <-- Khali line (ZAROORI!)
-// {"status": "success"}                  <-- Body
 function sendResponse(socket, statusCode, statusText, contentType, content, extraHeaders = []) {
-    // Content ko bytes mein convert karke uska size nikalte hain
-    // Kyunki Content-Length header mein bytes chahiye, characters nahi
-    // Agar content undefined ya null hai toh empty string use karte hain
+    // Parameters explanation:
+    // socket = client ke saath connection
+    // statusCode = 200, 404, 500, etc. (response ka status)
+    // statusText = "OK", "Not Found", etc. (status ka text)
+    // contentType = "text/plain", "application/json", etc. (data ka type)
+    // content = actual data/message jo bhejna hai
+    // extraHeaders = optional extra headers (default empty array)
+    
+    // STEP 1: Content ko safe banayo
+    // Agar content undefined ya null hai toh empty string use karo
     const safeContent = content || '';
+    
+    // STEP 2: Content ka size nikaalo (bytes mein)
+    // Buffer.byteLength() = string ka actual byte size deta hai
+    // Kyu? Kyunki Content-Length header mein bytes chahiye, characters nahi
+    // 'utf8' = character encoding (Hindi/English text ke liye)
     const contentLength = Buffer.byteLength(safeContent, 'utf8');
     
-    // Response headers ko ek array mein build karte hain
+    // STEP 3: Response headers ko build karo
+    // Headers = extra information jo response ke saath bhejni hai
     const headers = [
-        `HTTP/1.1 ${statusCode} ${statusText}`,  // 1. Status Line (e.g., "200 OK")
-        `Date: ${new Date().toUTCString()}`,     // 2. Time kya hua hai (GMT format)
-        `Content-Type: ${contentType}`,          // 3. Ye data kis type ka hai? (JSON? Text?)
-        `Content-Length: ${contentLength}`,       // 4. Message kitna bada hai? (bytes mein)
-        'Connection: close',                     // 5. Baat khatam, phone kaat do (keep-alive nahi kar rahe)
-        'Access-Control-Allow-Origin: *',        // 6. Kisi ko bhi use karne do (CORS - Bonus feature!)
-        'Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS', // CORS methods
-        'Access-Control-Allow-Headers: Content-Type', // CORS headers
+        `HTTP/1.1 ${statusCode} ${statusText}`,  // Status Line (e.g., "HTTP/1.1 200 OK")
+        `Date: ${new Date().toUTCString()}`,     // Current date/time (GMT format)
+        `Content-Type: ${contentType}`,          // Data ka type (JSON? Text?)
+        `Content-Length: ${contentLength}`,       // Data ka size (bytes mein)
+        'Connection: close',                     // Connection close karo (keep-alive nahi)
+        'Access-Control-Allow-Origin: *',        // CORS: Kisi bhi website se allow karo
+        'Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS', // CORS: Allowed methods
+        'Access-Control-Allow-Headers: Content-Type', // CORS: Allowed headers
     ];
     
-    // Agar koi extra headers diye gaye hain toh unhe add kar do
+    // STEP 4: Agar koi extra headers diye gaye hain toh unhe add karo
     if (extraHeaders && extraHeaders.length > 0) {
-        headers.push(...extraHeaders);
+        headers.push(...extraHeaders); // Spread operator se sab headers add karo
     }
     
-    // Response ko complete banate hain
+    // STEP 5: Complete response banayo
+    // Response = Headers + Khali Line + Body
     const response = [
-        ...headers,
-        '',                                      // KHALI LINE (Zaroori hai! Headers aur body ke beech)
-        safeContent                              // Asli maal (Data/Message)
-    ].join('\r\n'); // Lines ko '\r\n' se jod rahe hain (HTTP standard)
+        ...headers,           // Sab headers
+        '',                   // KHALI LINE (Zaroori hai! Headers aur body ke beech)
+        safeContent           // Actual data/message
+    ].join('\r\n');          // Sabko '\r\n' se jodo (HTTP standard)
+    // '\r\n' = line break character (jaise Enter key press karna)
 
-    // Response ko socket pe write karte hain (client ko bhej dete hain)
-    socket.write(response);
-    // Connection close kar dete hain (HTTP/1.1 mein ye zaroori nahi, but simple rakhne ke liye)
-    socket.end();
+    // STEP 6: Response ko client ko bhejo
+    socket.write(response);  // Response ko socket pe write karo (client tak pahunch jayega)
+    socket.end();            // Connection close karo (baat khatam)
 }
 
 // =====================================================
@@ -409,17 +610,32 @@ function sendResponse(socket, statusCode, statusText, contentType, content, extr
 // Server ko start karte hain aur ek specific port pe listen karne ko kehte hain
 // Node.js ka event loop automatically multiple clients ko handle kar lega
 // (Yeh ek bonus feature hai - concurrent request handling!)
+// =====================================================
 server.listen(PORT, () => {
+    // server.listen() = server ko start karo aur PORT pe suno
+    // Callback function = jab server start ho jaye, ye chalega
+    
     console.log(`🚀 Server port ${PORT} pe sun raha hai`);
     console.log(`📡 Test karne ke liye: curl http://localhost:${PORT}/`);
     console.log(`💡 Server ko band karne ke liye: Ctrl+C`);
 });
 
-// Graceful shutdown - agar server band karna ho toh
+// =====================================================
+// 🔄 GRACEFUL SHUTDOWN
+// =====================================================
+// Agar server band karna ho (Ctrl+C press karo)
+// Toh properly close karo (graceful shutdown)
+// =====================================================
 process.on('SIGINT', () => {
+    // SIGINT = Signal Interrupt (Ctrl+C press karne pe)
+    // process.on() = jab ye signal aaye, ye function chalao
+    
     console.log('\n👋 Server band ho raha hai...');
+    
+    // server.close() = server ko properly close karo
+    // Callback = jab close ho jaye, ye function chalao
     server.close(() => {
         console.log('✅ Server safely band ho gaya');
-        process.exit(0);
+        process.exit(0); // Process ko exit karo (0 = success)
     });
 });
