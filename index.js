@@ -7,7 +7,7 @@ const MAX_BODY_SIZE = 1024 * 1024;
 let dataStore = [];
 
 const server = net.createServer((socket) => {
-    console.log('✨ Ek client connect hua!');
+    console.log('✨ Client connected!');
 
     socket.on('data', (buffer) => {
         const requestString = buffer.toString();
@@ -101,7 +101,7 @@ const server = net.createServer((socket) => {
                 
                 const query = new URLSearchParams(queryString);
                 
-            const msg = query.get('message') || 'Kuch toh bolo!';
+            const msg = query.get('message') || 'Please say something!';
 
             sendResponse(socket, 200, 'OK', 'text/plain', `Echo: ${msg}`);
         }
@@ -275,13 +275,13 @@ const server = net.createServer((socket) => {
             }
             
         else {
-            sendResponse(socket, 404, 'Not Found', 'text/plain', 'Page nahi mila');
+            sendResponse(socket, 404, 'Not Found', 'text/plain', 'Page not found');
             }
             
         } catch (error) {
             console.error('❌ Server Error:', error);
             sendResponse(socket, 500, 'Internal Server Error', 'text/plain', 
-                'Server mein kuch galat ho gaya: ' + error.message);
+                'Server error: ' + error.message);
         }
     });
 
@@ -325,16 +325,16 @@ function sendResponse(socket, statusCode, statusText, contentType, content, extr
 }
 
 server.listen(PORT, () => {
-    console.log(`🚀 Server port ${PORT} pe sun raha hai`);
-    console.log(`📡 Test karne ke liye: curl http://localhost:${PORT}/`);
-    console.log(`💡 Server ko band karne ke liye: Ctrl+C`);
+    console.log(`🚀 Server listening on port ${PORT}`);
+    console.log(`📡 Test with: curl http://localhost:${PORT}/`);
+    console.log(`💡 Press Ctrl+C to stop the server`);
 });
 
 process.on('SIGINT', () => {
-    console.log('\n👋 Server band ho raha hai...');
+    console.log('\n👋 Shutting down server...');
     
     server.close(() => {
-        console.log('✅ Server safely band ho gaya');
+        console.log('✅ Server stopped safely');
         process.exit(0);
     });
 });
